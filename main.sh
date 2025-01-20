@@ -22,8 +22,12 @@ For regular usage you can run without providing any options.
 -e --env
     update your .env file with new variables
 --env-get=<var>
+    get the value of a <var>iable in .env (variable name is forced to UPPER CASE)
+--env-get-lower=<var>
     get the value of a <var>iable in .env
 --env-set=<var>,<val>
+    Set the <val>ue of a <var>iable in .env (variable name is forced to UPPER CASE)
+--env-set-lower=<var>,<val>
     Set the <val>ue of a <var>iable in .env
 -f --force
     force certain install/upgrade actions to run even if they would not be needed
@@ -67,8 +71,6 @@ SCRIPTPATH=$(cd -P "$(dirname "$(get_scriptname)")" > /dev/null 2>&1 && pwd)
 readonly SCRIPTPATH
 SCRIPTNAME="${SCRIPTPATH}/$(basename "$(get_scriptname)")"
 readonly SCRIPTNAME
-readonly COMPOSE_ENV="${SCRIPTPATH}/compose/.env"
-export COMPOSE_ENV
 
 # Cleanup Function
 cleanup() {
@@ -113,6 +115,8 @@ cmdline() {
                     echo "Invalid usage. Must be on of the following:"
                     echo "  --env-set with variable name ('--env-set=VAR,VAL') and value"
                     echo "  --env-get with variable name ('--env-get=VAR')"
+                    echo "  --env-set-lower with variable name ('--env-set-lower=Var,VAL') and value"
+                    echo "  --env-get-lower with variable name ('--env-get-lower=Var')"
                     exit
                 else
                     readonly ENVVAR=${ENVARG%%,*}
@@ -248,7 +252,7 @@ NC=$(tput sgr0 2> /dev/null || echo -e "\e[0m")
 readonly NC
 
 # Log Functions
-MKTEMP_LOG=$(mktemp) || echo "Failed to create temporary log file."
+MKTEMP_LOG=$(mktemp) || echo -e "Failed to create temporary log file.\nFailing command: ${F[C]}mktemp"
 readonly MKTEMP_LOG
 echo "DockSTARTer Log" > "${MKTEMP_LOG}"
 log() {
@@ -273,10 +277,21 @@ fatal() {
     exit 1
 }
 
+# System Information
+ARCH=$(uname -m)
+readonly ARCH
+export ARCH
+
+# Environment Information
+readonly COMPOSE_ENV="${SCRIPTPATH}/compose/.env"
+export COMPOSE_ENV
+
 # User/Group Information
 readonly DETECTED_PUID=${SUDO_UID:-$UID}
+export DETECTED_PUID
 DETECTED_UNAME=$(id -un "${DETECTED_PUID}" 2> /dev/null || true)
 readonly DETECTED_UNAME
+export DETECTED_UNAME
 DETECTED_PGID=$(id -g "${DETECTED_PUID}" 2> /dev/null || true)
 readonly DETECTED_PGID
 export DETECTED_PGID
@@ -285,9 +300,17 @@ readonly DETECTED_UGROUP
 export DETECTED_UGROUP
 DETECTED_HOMEDIR=$(eval echo "~${DETECTED_UNAME}" 2> /dev/null || true)
 readonly DETECTED_HOMEDIR
+export DETECTED_HOMEDIR
 
-# Repo Exists Function
-repo_exists() {
+# Check for supported CPU architecture
+check_arch() {
+    if [[ ${ARCH} != "aarch64" ]] && [[ ${ARCH} != "x86_64" ]]; then
+        fatal "Unsupported architecture."
+    fi
+}
+
+# Check if the repo exists relative to the SCRIPTPATH
+check_repo() {
     if [[ -d ${SCRIPTPATH}/.git ]] && [[ -d ${SCRIPTPATH}/.scripts ]]; then
         return
     else
@@ -295,10 +318,17 @@ repo_exists() {
     fi
 }
 
-# Root Check Function
-root_check() {
+# Check if running as root
+check_root() {
     if [[ ${DETECTED_PUID} == "0" ]] || [[ ${DETECTED_HOMEDIR} == "/root" ]]; then
         fatal "Running as root is not supported. Please run as a standard user with sudo."
+    fi
+}
+
+# Check if running with sudo
+check_sudo() {
+    if [[ ${EUID} -eq 0 ]]; then
+        fatal "Running with sudo is not supported. Commands requiring sudo will prompt automatically when required."
     fi
 }
 
@@ -350,15 +380,11 @@ fi
 
 # Main Function
 main() {
-    # Arch Check
-    ARCH=$(uname -m)
-    readonly ARCH
-    if [[ ${ARCH} != "aarch64" ]] && [[ ${ARCH} != "armv7l" ]] && [[ ${ARCH} != "x86_64" ]]; then
-        fatal "Unsupported architecture."
-    fi
+    check_arch
     # Terminal Check
     if [[ -t 1 ]]; then
-        root_check
+        check_root
+        check_sudo
     fi
     # Repo Check
     local PROMPT
@@ -371,7 +397,7 @@ main() {
         local DS_SYMLINK
         DS_SYMLINK=$(readlink -f "${DS_COMMAND}")
         if [[ ${SCRIPTNAME} != "${DS_SYMLINK}" ]]; then
-            if repo_exists; then
+            if check_repo; then
                 if run_script 'question_prompt' "${PROMPT:-CLI}" N "DockSTARTer installation found at ${DS_SYMLINK} location. Would you like to run ${SCRIPTNAME} instead?"; then
                     run_script 'symlink_ds'
                     DS_COMMAND=$(command -v ds || true)
@@ -379,25 +405,17 @@ main() {
                 fi
             fi
             warn "Attempting to run DockSTARTer from ${DS_SYMLINK} location."
-            sudo -H -E bash "${DS_SYMLINK}" -vu
-            sudo -H -E bash "${DS_SYMLINK}" -vi
-            exec sudo -H -E bash "${DS_SYMLINK}" "${ARGS[@]-}"
+            bash "${DS_SYMLINK}" -vu
+            bash "${DS_SYMLINK}" -vi
+            exec bash "${DS_SYMLINK}" "${ARGS[@]-}"
         fi
     else
-        if ! repo_exists; then
+        if ! check_repo; then
             warn "Attempting to clone DockSTARTer repo to ${DETECTED_HOMEDIR}/.docker location."
-            # Anti Sudo Check
-            if [[ ${EUID} -eq 0 ]]; then
-                fatal "Using sudo during cloning on first run is not supported."
-            fi
             git clone https://github.com/GhostWriters/DockSTARTer "${DETECTED_HOMEDIR}/.docker" || fatal "Failed to clone DockSTARTer repo.\nFailing command: ${F[C]}git clone https://github.com/GhostWriters/DockSTARTer \"${DETECTED_HOMEDIR}/.docker\""
             notice "Performing first run install."
-            exec sudo -H -E bash "${DETECTED_HOMEDIR}/.docker/main.sh" "-vi"
+            exec bash "${DETECTED_HOMEDIR}/.docker/main.sh" "-vi"
         fi
-    fi
-    # Sudo Check
-    if [[ ${EUID} -ne 0 ]]; then
-        exec sudo -H -E bash "${SCRIPTNAME}" "${ARGS[@]-}"
     fi
     # Create Symlink
     run_script 'symlink_ds'
@@ -426,26 +444,46 @@ main() {
         exit
     fi
     if [[ -n ${ENV-} ]]; then
-        run_script 'env_update'
         run_script 'appvars_create_all'
+        run_script 'env_update'
         exit
     fi
     if [[ -n ${ENVMETHOD-} ]]; then
         case "${ENVMETHOD-}" in
             --env-get)
                 if [[ ${ENVVAR-} != "" ]]; then
-                    run_script 'env_get' "${ENVVAR}"
+                    run_script 'env_get' "${ENVVAR^^}"
                 else
                     echo "Invalid usage. Must be"
                     echo "  --env-get with variable name ('--env-get=VAR')"
+                    echo "  Variable name will be forced to UPPER CASE"
                 fi
                 ;;
             --env-set)
                 if [[ ${ENVVAR-} != "" ]] && [[ ${ENVVAL-} != "" ]]; then
-                    run_script 'env_set' "${ENVVAR}" "${ENVVAL}"
+                    run_script 'env_set' "${ENVVAR^^}" "${ENVVAL}"
                 else
                     echo "Invalid usage. Must be"
                     echo "  --env-set with variable name and value ('--env-set=VAR,VAL')"
+                    echo "  Variable name will be forced to UPPER CASE"
+                fi
+                ;;
+            --env-get-lower)
+                if [[ ${ENVVAR-} != "" ]]; then
+                    run_script 'env_get' "${ENVVAR}"
+                else
+                    echo "Invalid usage. Must be"
+                    echo "  --env-get-lower with variable name ('--env-get-lower=Var')"
+                    echo "  Variable name can be Mixed Case"
+                fi
+                ;;
+            --env-set-lower)
+                if [[ ${ENVVAR-} != "" ]] && [[ ${ENVVAL-} != "" ]]; then
+                    run_script 'env_set' "${ENVVAR}" "${ENVVAL}"
+                else
+                    echo "Invalid usage. Must be"
+                    echo "  --env-set-lower with variable name and value ('--env-set-lower=Var,VAL')"
+                    echo "  Variable name can be Mixed Case"
                 fi
                 ;;
             *)

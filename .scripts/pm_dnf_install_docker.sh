@@ -5,7 +5,7 @@ IFS=$'\n\t'
 pm_dnf_install_docker() {
     # https://docs.docker.com/install/linux/docker-ce/fedora/
     info "Removing conflicting Docker packages."
-    dnf -y remove docker \
+    sudo dnf -y remove docker \
         docker-client \
         docker-client-latest \
         docker-common \
@@ -21,6 +21,7 @@ pm_dnf_install_docker() {
 }
 
 test_pm_dnf_install_docker() {
+    # run_script 'pm_dnf_repos'
     # run_script 'pm_dnf_install_docker'
     warn "CI does not test pm_dnf_install_docker."
 }

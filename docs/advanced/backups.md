@@ -4,11 +4,11 @@
 
 ## Creating backups
 
-DockSTARTer menu has an option for `Backup Config`, or you can use one of `sudo ds -b min` / `sudo ds -b med` / `sudo ds -b max` to create backups.
+DockSTARTer menu has an option for `Backup Config`, or you can use one of `ds -b min` / `ds -b med` / `ds -b max` to create backups.
 
 > Min: Backs up your .env file
 > Med: Backs up your .env file and the config folder for any enabled app
-> Max: Backs up your .env file and any config folder found in your DOCKERCONFDIR. Apps will be stopped before running a backup and started after completing a backup.
+> Max: Backs up your .env file and any config folder found in your DOCKER_VOLUME_CONFIG. Apps will be stopped before running a backup and started after completing a backup.
 
 Med and Max also support pre/post commands in between each app (so you could disable uptime monitors for example)
 Min, Med, and Max support pre/post commands for the entire run. These commands can be set in `.env`
